@@ -111,6 +111,27 @@ agent = Agent(model)
 ...
 ```
 
+### Encrypted reasoning handoff (stateless)
+
+For reasoning models like `o3` and `gpt‑5` that support encrypted reasoning items, you can optionally enable a stateless, encrypted handoff of internal reasoning across turns. This preserves privacy (no plaintext chain-of-thought) while improving multi-step agent performance.
+
+To enable it, set `openai_reasoning_encrypted_handoff=True` in `OpenAIResponsesModelSettings`:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
+
+model = OpenAIResponsesModel('o3')
+settings = OpenAIResponsesModelSettings(
+    openai_reasoning_encrypted_handoff=True,
+)
+agent = Agent(model, model_settings=settings)
+```
+
+Notes:
+- Only applies to the Responses API path; other providers silently ignore the encrypted artifact.
+- Default is disabled to preserve full backward compatibility.
+
 The Responses API has built-in tools that you can use instead of building your own:
 
 - [Web search](https://platform.openai.com/docs/guides/tools-web-search): allow models to search the web for the latest information before generating a response.

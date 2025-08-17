@@ -621,7 +621,12 @@ def _content_model_response(m: ModelResponse) -> _GeminiContent:
             # This is currently never returned from gemini
             pass
         else:
-            assert_never(item)
+            from ..messages import EncryptedReasoningPart as _EncryptedReasoningPart
+
+            if isinstance(item, _EncryptedReasoningPart):
+                pass
+            else:
+                assert_never(item)
     return _GeminiContent(role='model', parts=parts)
 
 

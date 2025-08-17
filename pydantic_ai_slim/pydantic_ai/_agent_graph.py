@@ -446,7 +446,13 @@ class CallToolsNode(AgentNode[DepsT, NodeRunEndT]):
                     elif isinstance(part, _messages.ThinkingPart):
                         thinking_parts.append(part)
                     else:
-                        assert_never(part)
+                        # Ignore encrypted reasoning or other non-actionable parts
+                        from .messages import EncryptedReasoningPart as _EncryptedReasoningPart
+
+                        if isinstance(part, _EncryptedReasoningPart):
+                            pass
+                        else:
+                            assert_never(part)
 
                 # At the moment, we prioritize at least executing tool calls if they are present.
                 # In the future, we'd consider making this configurable at the agent or run level.
@@ -872,7 +878,7 @@ async def _process_message_history(
     run_context: RunContext[DepsT],
 ) -> list[_messages.ModelMessage]:
     """Process message history through a sequence of processors."""
-    messages = state.message_history
+    messages: list[_messages.ModelMessage] = state.message_history
     for processor in processors:
         takes_ctx = is_takes_ctx(processor)
 
@@ -880,8 +886,7 @@ async def _process_message_history(
             if takes_ctx:
                 messages = await processor(run_context, messages)
             else:
-                async_processor = cast(_HistoryProcessorAsync, processor)
-                messages = await async_processor(messages)
+                messages = await cast(_HistoryProcessorAsync, processor)(messages)
         else:
             if takes_ctx:
                 sync_processor_with_ctx = cast(_HistoryProcessorSyncWithCtx[DepsT], processor)
@@ -891,5 +896,6 @@ async def _process_message_history(
                 messages = await run_in_executor(sync_processor, messages)
 
     # Replaces the message history in the state with the processed messages
+    # Narrow type for return
     state.message_history = messages
     return messages

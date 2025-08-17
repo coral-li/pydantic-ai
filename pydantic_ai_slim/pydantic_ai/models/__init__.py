@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from functools import cache, cached_property
-from typing import Any, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 
 import httpx
 from typing_extensions import Literal, TypeAliasType, TypedDict
@@ -43,6 +43,18 @@ from ..profiles._json_schema import JsonSchemaTransformer
 from ..settings import ModelSettings
 from ..tools import ToolDefinition
 from ..usage import RequestUsage
+
+if TYPE_CHECKING:  # type-only import to avoid cycles
+    from .openai import OpenAIResponsesModel as OpenAIResponsesModel
+
+
+def __getattr__(name: str):  # pragma: no cover - lazy re-export to avoid circular import at module import time
+    if name == 'OpenAIResponsesModel':
+        from .openai import OpenAIResponsesModel as _OpenAIResponsesModel
+
+        return _OpenAIResponsesModel
+    raise AttributeError(name)
+
 
 KnownModelName = TypeAliasType(
     'KnownModelName',

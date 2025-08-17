@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, cast, overload
 
 import pydantic
 import pydantic_core
-from opentelemetry._events import Event  # pyright: ignore[reportPrivateImportUsage]
 from typing_extensions import TypeAlias, deprecated
 
 from . import _utils
@@ -23,6 +22,18 @@ from .usage import RequestUsage
 
 if TYPE_CHECKING:
     from .models.instrumented import InstrumentationSettings
+
+
+@dataclass
+class Event:
+    """Event used for OpenTelemetry-like instrumentation with minimal fields.
+
+    This is a small, public replacement for the private `opentelemetry._events.Event`.
+    """
+
+    name: str
+    body: dict[str, Any]
+    attributes: dict[str, Any] | None = None
 
 
 AudioMediaType: TypeAlias = Literal['audio/wav', 'audio/mpeg', 'audio/ogg', 'audio/flac', 'audio/aiff', 'audio/aac']
@@ -743,6 +754,29 @@ class ThinkingPart:
 
 
 @dataclass(repr=False)
+class EncryptedReasoningPart:
+    """An encrypted reasoning artifact returned by a model provider.
+
+    This contains encrypted content that can be sent back to the provider to allow
+    continuation of internal reasoning across turns, without exposing plaintext.
+    """
+
+    encrypted_content: str
+    """Provider-encrypted reasoning content."""
+
+    id: str | None = None
+    """Optional provider identifier for the reasoning item."""
+
+    part_kind: Literal['encrypted-reasoning'] = 'encrypted-reasoning'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def has_content(self) -> bool:  # pragma: no cover - simple truthy check
+        return bool(self.encrypted_content)
+
+    __repr__ = _utils.dataclasses_no_defaults_repr
+
+
+@dataclass(repr=False)
 class BaseToolCallPart:
     """A tool call from a model."""
 
@@ -817,7 +851,7 @@ class BuiltinToolCallPart(BaseToolCallPart):
 
 
 ModelResponsePart = Annotated[
-    Union[TextPart, ToolCallPart, BuiltinToolCallPart, BuiltinToolReturnPart, ThinkingPart],
+    Union[TextPart, ToolCallPart, BuiltinToolCallPart, BuiltinToolReturnPart, ThinkingPart, EncryptedReasoningPart],
     pydantic.Discriminator('part_kind'),
 ]
 """A message part returned by a model."""

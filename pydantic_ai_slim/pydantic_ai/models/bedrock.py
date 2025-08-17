@@ -23,6 +23,7 @@ from pydantic_ai.messages import (
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
     DocumentUrl,
+    EncryptedReasoningPart,
     ImageUrl,
     ModelMessage,
     ModelRequest,
@@ -485,6 +486,9 @@ class BedrockConverseModel(Model):
                         else:
                             # NOTE: We don't pass the thinking part to Bedrock for models other than Claude since it raises an error.
                             pass
+                    elif isinstance(item, EncryptedReasoningPart):
+                        # Ignore encrypted reasoning artifacts
+                        pass
                     elif isinstance(item, (BuiltinToolCallPart, BuiltinToolReturnPart)):
                         pass
                     else:

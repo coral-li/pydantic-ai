@@ -298,7 +298,12 @@ class TestStreamedResponse(StreamedResponse):
                 # NOTE: There's no way to reach this part of the code, since we don't generate ThinkingPart on TestModel.
                 assert False, "This should be unreachable — we don't generate ThinkingPart on TestModel."
             else:
-                assert_never(part)
+                from ..messages import EncryptedReasoningPart as _EncryptedReasoningPart
+
+                if isinstance(part, _EncryptedReasoningPart):
+                    pass
+                else:
+                    assert_never(part)
 
     @property
     def model_name(self) -> str:
