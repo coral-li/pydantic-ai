@@ -17,6 +17,7 @@ from ..exceptions import UserError
 from ..messages import (
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
+    EncryptedReasoningPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -297,13 +298,11 @@ class TestStreamedResponse(StreamedResponse):
             elif isinstance(part, ThinkingPart):  # pragma: no cover
                 # NOTE: There's no way to reach this part of the code, since we don't generate ThinkingPart on TestModel.
                 assert False, "This should be unreachable — we don't generate ThinkingPart on TestModel."
+            elif isinstance(part, EncryptedReasoningPart):
+                # Ignore encrypted reasoning when present in test streams
+                pass
             else:
-                from ..messages import EncryptedReasoningPart as _EncryptedReasoningPart
-
-                if isinstance(part, _EncryptedReasoningPart):
-                    pass
-                else:
-                    assert_never(part)
+                assert_never(part)
 
     @property
     def model_name(self) -> str:

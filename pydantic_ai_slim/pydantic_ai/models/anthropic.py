@@ -21,6 +21,7 @@ from ..messages import (
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
     DocumentUrl,
+    EncryptedReasoningPart,
     ImageUrl,
     ModelMessage,
     ModelRequest,
@@ -462,13 +463,10 @@ class AnthropicModel(Model):
                             else:
                                 raise ValueError(f'Unsupported tool name: {response_part.tool_name}')
                             assistant_content_params.append(server_tool_result_block_param)
+                    elif isinstance(response_part, EncryptedReasoningPart):
+                        pass
                     else:
-                        from ..messages import EncryptedReasoningPart as _EncryptedReasoningPart
-
-                        if isinstance(response_part, _EncryptedReasoningPart):
-                            pass
-                        else:
-                            assert_never(response_part)
+                        assert_never(response_part)
                 if len(assistant_content_params) > 0:
                     anthropic_messages.append(BetaMessageParam(role='assistant', content=assistant_content_params))
             else:

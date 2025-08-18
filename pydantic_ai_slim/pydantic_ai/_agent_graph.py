@@ -445,14 +445,11 @@ class CallToolsNode(AgentNode[DepsT, NodeRunEndT]):
                         yield _messages.BuiltinToolResultEvent(part)
                     elif isinstance(part, _messages.ThinkingPart):
                         thinking_parts.append(part)
-                    else:
+                    elif isinstance(part, _messages.EncryptedReasoningPart):
                         # Ignore encrypted reasoning or other non-actionable parts
-                        from .messages import EncryptedReasoningPart as _EncryptedReasoningPart
-
-                        if isinstance(part, _EncryptedReasoningPart):
-                            pass
-                        else:
-                            assert_never(part)
+                        pass
+                    else:
+                        assert_never(part)
 
                 # At the moment, we prioritize at least executing tool calls if they are present.
                 # In the future, we'd consider making this configurable at the agent or run level.
@@ -886,7 +883,8 @@ async def _process_message_history(
             if takes_ctx:
                 messages = await processor(run_context, messages)
             else:
-                messages = await cast(_HistoryProcessorAsync, processor)(messages)
+                async_processor = cast(_HistoryProcessorAsync, processor)
+                messages = await async_processor(messages)
         else:
             if takes_ctx:
                 sync_processor_with_ctx = cast(_HistoryProcessorSyncWithCtx[DepsT], processor)
