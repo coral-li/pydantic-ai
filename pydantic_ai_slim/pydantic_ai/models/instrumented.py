@@ -11,6 +11,7 @@ from opentelemetry._events import (
     Event,  # pyright: ignore[reportPrivateImportUsage]
     EventLogger,  # pyright: ignore[reportPrivateImportUsage]
     EventLoggerProvider,  # pyright: ignore[reportPrivateImportUsage]
+    get_event_logger_provider,  # pyright: ignore[reportPrivateImportUsage]
 )
 from opentelemetry.metrics import MeterProvider, get_meter_provider
 from opentelemetry.trace import Span, Tracer, TracerProvider, get_tracer_provider
@@ -113,23 +114,11 @@ class InstrumentationSettings:
 
         tracer_provider = tracer_provider or get_tracer_provider()
         meter_provider = meter_provider or get_meter_provider()
-        if event_logger_provider is None:
-            try:
-                import importlib
-
-                _events_mod = importlib.import_module('opentelemetry._events')
-                _get = getattr(_events_mod, 'get_event_logger_provider', None)
-                if _get is None:
-                    raise AttributeError('get_event_logger_provider not found')
-                event_logger_provider = _get()
-            except Exception as _e:  # pragma: no cover
-                raise RuntimeError('OpenTelemetry event logger provider unavailable') from _e
+        event_logger_provider = event_logger_provider or get_event_logger_provider()
         scope_name = 'pydantic-ai'
         self.tracer = tracer_provider.get_tracer(scope_name, __version__)
         self.meter = meter_provider.get_meter(scope_name, __version__)
-        # At runtime this is a valid provider with get_event_logger
-        provider = event_logger_provider
-        self.event_logger = provider.get_event_logger(scope_name, __version__)  # type: ignore[reportOptionalMemberAccess]
+        self.event_logger = event_logger_provider.get_event_logger(scope_name, __version__)
         self.event_mode = event_mode
         self.include_binary_content = include_binary_content
         self.include_content = include_content
@@ -187,12 +176,7 @@ class InstrumentationSettings:
             events.extend(message_events)
 
         for event in events:
-            serialized = InstrumentedModel.serialize_any(event.body)
-            # Convert back to dict when possible; else use minimal mapping
-            try:
-                event.body = json.loads(serialized) if isinstance(serialized, str) else serialized
-            except Exception:
-                event.body = {'body': serialized}
+            event.body = InstrumentedModel.serialize_any(event.body)
         return events
 
 
@@ -319,6 +303,7 @@ class InstrumentedModel(WrapperModel):
                             Event(
                                 'gen_ai.choice',
                                 body={
+                                    # TODO finish_reason
                                     'index': 0,
                                     'message': event.body,
                                 },
@@ -347,25 +332,8 @@ class InstrumentedModel(WrapperModel):
 
     def _emit_events(self, span: Span, events: list[Event]) -> None:
         if self.instrumentation_settings.event_mode == 'logs':
-            try:
-                import importlib
-
-                _events_mod = importlib.import_module('opentelemetry._events')
-                _OTelEvent = getattr(_events_mod, 'Event', None)
-                if _OTelEvent is None:
-                    return
-            except Exception:  # pragma: no cover
-                return
             for event in events:
-                otel_event = _OTelEvent(event.name, body=event.body)
-                attrs = dict(event.attributes or {})
-                # Keep event.name last in attributes for consistency with snapshots
-                attrs['event.name'] = event.name
-                try:
-                    otel_event.attributes = attrs
-                except Exception:
-                    pass
-                self.instrumentation_settings.event_logger.emit(otel_event)
+                self.instrumentation_settings.event_logger.emit(event)
         else:
             attr_name = 'events'
             span.set_attributes(
@@ -410,10 +378,7 @@ class InstrumentedModel(WrapperModel):
             body = event.body  # type: ignore
         else:
             body = {'body': event.body}
-        # Keep event.name after attributes to match existing snapshot expectations
-        d: dict[str, Any] = {**body, **(event.attributes or {})}
-        d['event.name'] = event.name
-        return d
+        return {**body, **(event.attributes or {})}
 
     @staticmethod
     def serialize_any(value: Any) -> str:
