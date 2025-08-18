@@ -445,6 +445,9 @@ class CallToolsNode(AgentNode[DepsT, NodeRunEndT]):
                         yield _messages.BuiltinToolResultEvent(part)
                     elif isinstance(part, _messages.ThinkingPart):
                         thinking_parts.append(part)
+                    elif isinstance(part, _messages.EncryptedReasoningPart):
+                        # Ignore encrypted reasoning or other non-actionable parts
+                        pass
                     else:
                         assert_never(part)
 

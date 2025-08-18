@@ -24,6 +24,7 @@ from ..messages import (
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
     DocumentUrl,
+    EncryptedReasoningPart,
     ImageUrl,
     ModelMessage,
     ModelRequest,
@@ -181,6 +182,13 @@ class OpenAIResponsesModelSettings(OpenAIModelSettings, total=False):
     Lower values will result in more concise responses, while higher values will
     result in more verbose responses. Currently supported values are `low`,
     `medium`, and `high`.
+    """
+
+    openai_reasoning_encrypted_handoff: bool
+    """When True, request encrypted reasoning content from OpenAI Responses API and forward it
+    on subsequent turns to enable stateless continuation of internal reasoning.
+
+    Default is False for backward compatibility.
     """
 
 
@@ -553,6 +561,9 @@ class OpenAIModel(Model):
                 for item in message.parts:
                     if isinstance(item, TextPart):
                         texts.append(item.content)
+                    elif isinstance(item, EncryptedReasoningPart):
+                        # Ignore encrypted reasoning in Chat Completions path
+                        pass
                     elif isinstance(item, ThinkingPart):
                         # NOTE: We don't send ThinkingPart to the providers yet. If you are unsatisfied with this,
                         # please open an issue. The below code is the code to send thinking to the provider.
@@ -759,10 +770,9 @@ class OpenAIResponsesModel(Model):
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
         check_allow_model_requests()
-        response = await self._responses_create(
-            messages, False, cast(OpenAIResponsesModelSettings, model_settings or {}), model_request_parameters
-        )
-        return self._process_response(response)
+        settings_cast = cast(OpenAIResponsesModelSettings, model_settings or {})
+        response = await self._responses_create(messages, False, settings_cast, model_request_parameters)
+        return self._process_response(response, settings_cast)
 
     @asynccontextmanager
     async def request_stream(
@@ -773,22 +783,33 @@ class OpenAIResponsesModel(Model):
         run_context: RunContext[Any] | None = None,
     ) -> AsyncIterator[StreamedResponse]:
         check_allow_model_requests()
-        response = await self._responses_create(
-            messages, True, cast(OpenAIResponsesModelSettings, model_settings or {}), model_request_parameters
-        )
+        settings_cast = cast(OpenAIResponsesModelSettings, model_settings or {})
+        response = await self._responses_create(messages, True, settings_cast, model_request_parameters)
         async with response:
-            yield await self._process_streamed_response(response, model_request_parameters)
+            yield await self._process_streamed_response(
+                response, model_request_parameters, bool(settings_cast.get('openai_reasoning_encrypted_handoff'))
+            )
 
-    def _process_response(self, response: responses.Response) -> ModelResponse:
+    def _process_response(
+        self, response: responses.Response, settings: OpenAIResponsesModelSettings | None = None
+    ) -> ModelResponse:
         """Process a non-streamed response, and prepare a message to return."""
         timestamp = number_to_datetime(response.created_at)
         items: list[ModelResponsePart] = []
+        enable_encrypted = bool((settings or {}).get('openai_reasoning_encrypted_handoff'))
         for item in response.output:
             if item.type == 'reasoning':
                 for summary in item.summary:
                     # NOTE: We use the same id for all summaries because we can merge them on the round trip.
                     # The providers don't force the signature to be unique.
                     items.append(ThinkingPart(content=summary.text, id=item.id))
+                # Optionally capture encrypted reasoning content if present
+                if enable_encrypted:
+                    encrypted_content = getattr(item, 'encrypted_content', None)
+                    if encrypted_content:
+                        from ..messages import EncryptedReasoningPart  # local import to avoid cycles
+
+                        items.append(EncryptedReasoningPart(encrypted_content=encrypted_content, id=item.id))
             elif item.type == 'message':
                 for content in item.content:
                     if content.type == 'output_text':  # pragma: no branch
@@ -807,6 +828,7 @@ class OpenAIResponsesModel(Model):
         self,
         response: AsyncStream[responses.ResponseStreamEvent],
         model_request_parameters: ModelRequestParameters,
+        encrypted_handoff_enabled: bool,
     ) -> OpenAIResponsesStreamedResponse:
         """Process a streamed response, and prepare a streaming response to return."""
         peekable_response = _utils.PeekableAsyncStream(response)
@@ -820,6 +842,7 @@ class OpenAIResponsesModel(Model):
             _model_name=self._model_name,
             _response=peekable_response,
             _timestamp=number_to_datetime(first_chunk.response.created_at),
+            _encrypted_handoff_enabled=encrypted_handoff_enabled,
         )
 
     @overload
@@ -893,6 +916,21 @@ class OpenAIResponsesModel(Model):
         try:
             extra_headers = model_settings.get('extra_headers', {})
             extra_headers.setdefault('User-Agent', get_user_agent())
+            extra_body_obj: object | None = model_settings.get('extra_body')
+
+            # If enabled, request encrypted reasoning content from the provider
+            if model_settings.get('openai_reasoning_encrypted_handoff'):
+                # The OpenAI client accepts arbitrary fields via extra_body
+                include_list = ['reasoning.encrypted_content']
+                if isinstance(extra_body_obj, dict):
+                    # Do not overwrite user-provided include if already set
+                    eb = cast(dict[str, Any], extra_body_obj)
+                    if 'include' not in eb:
+                        eb = {**eb, 'include': include_list}
+                    extra_body_obj = cast(object, eb)
+                else:
+                    extra_body_obj = cast(object, {'include': include_list})
+
             return await self.client.responses.create(
                 input=openai_messages,
                 model=self._model_name,
@@ -911,7 +949,7 @@ class OpenAIResponsesModel(Model):
                 user=model_settings.get('openai_user', NOT_GIVEN),
                 text=text or NOT_GIVEN,
                 extra_headers=extra_headers,
-                extra_body=model_settings.get('extra_body'),
+                extra_body=extra_body_obj,
             )
         except APIStatusError as e:
             if (status_code := e.status_code) >= 400:
@@ -978,69 +1016,76 @@ class OpenAIResponsesModel(Model):
         openai_messages: list[responses.ResponseInputItemParam] = []
         for message in messages:
             if isinstance(message, ModelRequest):
-                for part in message.parts:
-                    if isinstance(part, SystemPromptPart):
-                        openai_messages.append(responses.EasyInputMessageParam(role='system', content=part.content))
-                    elif isinstance(part, UserPromptPart):
-                        openai_messages.append(await self._map_user_prompt(part))
-                    elif isinstance(part, ToolReturnPart):
-                        openai_messages.append(
-                            FunctionCallOutput(
-                                type='function_call_output',
-                                call_id=_guard_tool_call_id(t=part),
-                                output=part.model_response_str(),
-                            )
-                        )
-                    elif isinstance(part, RetryPromptPart):
-                        # TODO(Marcelo): How do we test this conditional branch?
-                        if part.tool_name is None:  # pragma: no cover
-                            openai_messages.append(
-                                Message(role='user', content=[{'type': 'input_text', 'text': part.model_response()}])
-                            )
-                        else:
-                            openai_messages.append(
-                                FunctionCallOutput(
-                                    type='function_call_output',
-                                    call_id=_guard_tool_call_id(t=part),
-                                    output=part.model_response(),
-                                )
-                            )
-                    else:
-                        assert_never(part)
+                openai_messages.extend(await self._map_request_parts(message))
             elif isinstance(message, ModelResponse):
-                # last_thinking_part_idx: int | None = None
-                for item in message.parts:
-                    if isinstance(item, TextPart):
-                        openai_messages.append(responses.EasyInputMessageParam(role='assistant', content=item.content))
-                    elif isinstance(item, ToolCallPart):
-                        openai_messages.append(self._map_tool_call(item))
-                    # OpenAI doesn't return built-in tool calls
-                    elif isinstance(item, (BuiltinToolCallPart, BuiltinToolReturnPart)):
-                        pass
-                    elif isinstance(item, ThinkingPart):
-                        # NOTE: We don't send ThinkingPart to the providers yet. If you are unsatisfied with this,
-                        # please open an issue. The below code is the code to send thinking to the provider.
-                        # if last_thinking_part_idx is not None:
-                        #     reasoning_item = cast(responses.ResponseReasoningItemParam, openai_messages[last_thinking_part_idx])  # fmt: skip
-                        #     if item.id == reasoning_item['id']:
-                        #         assert isinstance(reasoning_item['summary'], list)
-                        #         reasoning_item['summary'].append(Summary(text=item.content, type='summary_text'))
-                        #         continue
-                        # last_thinking_part_idx = len(openai_messages)
-                        # openai_messages.append(
-                        #     responses.ResponseReasoningItemParam(
-                        #         id=item.id or generate_tool_call_id(),
-                        #         summary=[Summary(text=item.content, type='summary_text')],
-                        #         type='reasoning',
-                        #     )
-                        # )
-                        pass
-                    else:
-                        assert_never(item)
+                openai_messages.extend(self._map_response_parts(message))
             else:
                 assert_never(message)
         instructions = self._get_instructions(messages) or NOT_GIVEN
         return instructions, openai_messages
+
+    async def _map_request_parts(self, message: ModelRequest) -> list[responses.ResponseInputItemParam]:
+        items: list[responses.ResponseInputItemParam] = []
+        for part in message.parts:
+            if isinstance(part, SystemPromptPart):
+                items.append(responses.EasyInputMessageParam(role='system', content=part.content))
+            elif isinstance(part, UserPromptPart):
+                items.append(await self._map_user_prompt(part))
+            elif isinstance(part, ToolReturnPart):
+                items.append(
+                    FunctionCallOutput(
+                        type='function_call_output',
+                        call_id=_guard_tool_call_id(t=part),
+                        output=part.model_response_str(),
+                    )
+                )
+            elif isinstance(part, RetryPromptPart):
+                # TODO(Marcelo): How do we test this conditional branch?
+                items.extend(self._map_retry_part(part))
+            else:
+                assert_never(part)
+        return items
+
+    @staticmethod
+    def _map_retry_part(part: RetryPromptPart) -> list[responses.ResponseInputItemParam]:
+        if part.tool_name is None:  # pragma: no cover
+            return [Message(role='user', content=[{'type': 'input_text', 'text': part.model_response()}])]
+        return [
+            FunctionCallOutput(
+                type='function_call_output', call_id=_guard_tool_call_id(t=part), output=part.model_response()
+            )
+        ]
+
+    def _map_response_parts(self, message: ModelResponse) -> list[responses.ResponseInputItemParam]:
+        texts: list[str] = []
+        pending: list[responses.ResponseInputItemParam] = []
+        for item in message.parts:
+            if isinstance(item, TextPart):
+                texts.append(item.content)
+            elif isinstance(item, EncryptedReasoningPart):
+                pending.append(
+                    cast(
+                        responses.ResponseInputItemParam,
+                        {
+                            'type': 'reasoning',
+                            'encrypted_content': item.encrypted_content,
+                            **({'id': item.id} if item.id else {}),
+                        },
+                    )
+                )
+            elif isinstance(item, ToolCallPart):
+                pending.append(self._map_tool_call(item))
+            elif isinstance(item, (BuiltinToolCallPart, BuiltinToolReturnPart)):
+                pass
+            elif isinstance(item, ThinkingPart):
+                pass
+            else:
+                assert_never(item)
+        items: list[responses.ResponseInputItemParam] = []
+        if texts:
+            items.append(responses.EasyInputMessageParam(role='assistant', content='\n\n'.join(texts)))
+        items.extend(pending)
+        return items
 
     @staticmethod
     def _map_tool_call(t: ToolCallPart) -> responses.ResponseFunctionToolCallParam:
@@ -1191,6 +1236,9 @@ class OpenAIResponsesStreamedResponse(StreamedResponse):
     _model_name: OpenAIModelName
     _response: AsyncIterable[responses.ResponseStreamEvent]
     _timestamp: datetime
+    _encrypted_handoff_enabled: bool = False
+
+    _encrypted_reasoning_items: list[tuple[str | None, str]] = field(default_factory=list, init=False)
 
     async def _get_event_iterator(self) -> AsyncIterator[ModelResponseStreamEvent]:  # noqa: C901
         async for chunk in self._response:
@@ -1244,6 +1292,10 @@ class OpenAIResponsesStreamedResponse(StreamedResponse):
                         content=content,
                         signature=chunk.item.id,
                     )
+                    if self._encrypted_handoff_enabled:
+                        encrypted_content = getattr(chunk.item, 'encrypted_content', None)
+                        if encrypted_content:
+                            self._encrypted_reasoning_items.append((chunk.item.id, encrypted_content))
                 elif isinstance(chunk.item, responses.ResponseOutputMessage):
                     pass
                 elif isinstance(chunk.item, responses.ResponseFunctionWebSearch):
@@ -1315,6 +1367,15 @@ class OpenAIResponsesStreamedResponse(StreamedResponse):
     def timestamp(self) -> datetime:
         """Get the timestamp of the response."""
         return self._timestamp
+
+    def get(self) -> ModelResponse:
+        response = super().get()
+        if self._encrypted_handoff_enabled and self._encrypted_reasoning_items:
+            parts = list(response.parts)
+            for rid, enc in self._encrypted_reasoning_items:
+                parts.append(EncryptedReasoningPart(encrypted_content=enc, id=rid))
+            response.parts = parts
+        return response
 
 
 def _map_usage(response: chat.ChatCompletion | ChatCompletionChunk | responses.Response) -> usage.RequestUsage:

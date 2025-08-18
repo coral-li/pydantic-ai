@@ -14,6 +14,7 @@ from .._utils import generate_tool_call_id as _generate_tool_call_id, guard_tool
 from ..messages import (
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
+    EncryptedReasoningPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -222,6 +223,9 @@ class CohereModel(Model):
                 for item in message.parts:
                     if isinstance(item, TextPart):
                         texts.append(item.content)
+                    elif isinstance(item, EncryptedReasoningPart):
+                        # Ignore provider-agnostic encrypted reasoning
+                        pass
                     elif isinstance(item, ThinkingPart):
                         # NOTE: We don't send ThinkingPart to the providers yet. If you are unsatisfied with this,
                         # please open an issue. The below code is the code to send thinking to the provider.

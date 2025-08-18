@@ -21,6 +21,7 @@ from ..messages import (
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
     DocumentUrl,
+    EncryptedReasoningPart,
     ImageUrl,
     ModelMessage,
     ModelRequest,
@@ -509,6 +510,9 @@ class MistralModel(Model):
                         # NOTE: We don't send ThinkingPart to the providers yet. If you are unsatisfied with this,
                         # please open an issue. The below code is the code to send thinking to the provider.
                         # content_chunks.append(MistralTextChunk(text=f'<think>{part.content}</think>'))
+                        pass
+                    elif isinstance(part, EncryptedReasoningPart):
+                        # Ignore encrypted reasoning
                         pass
                     elif isinstance(part, ToolCallPart):
                         tool_calls.append(self._map_tool_call(part))

@@ -21,6 +21,7 @@ from ..messages import (
     BinaryContent,
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
+    EncryptedReasoningPart,
     FileUrl,
     ModelMessage,
     ModelRequest,
@@ -619,6 +620,9 @@ def _content_model_response(m: ModelResponse) -> _GeminiContent:
                 parts.append(_GeminiTextPart(text=item.content))
         elif isinstance(item, (BuiltinToolCallPart, BuiltinToolReturnPart)):  # pragma: no cover
             # This is currently never returned from gemini
+            pass
+        elif isinstance(item, EncryptedReasoningPart):
+            # Ignore encrypted reasoning artifacts
             pass
         else:
             assert_never(item)

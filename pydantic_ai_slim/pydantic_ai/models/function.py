@@ -18,6 +18,7 @@ from ..messages import (
     BinaryContent,
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
+    EncryptedReasoningPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -344,6 +345,9 @@ def _estimate_usage(messages: Iterable[ModelMessage]) -> usage.RequestUsage:
                 # TODO(Marcelo): We need to add coverage here.
                 elif isinstance(part, BuiltinToolReturnPart):  # pragma: no cover
                     response_tokens += _estimate_string_tokens(part.model_response_str())
+                elif isinstance(part, EncryptedReasoningPart):
+                    # Ignore encrypted reasoning parts for usage estimation
+                    pass
                 else:
                     assert_never(part)
         else:

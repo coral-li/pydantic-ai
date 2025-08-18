@@ -20,6 +20,7 @@ from ..messages import (
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
     DocumentUrl,
+    EncryptedReasoningPart,
     ImageUrl,
     ModelMessage,
     ModelRequest,
@@ -311,6 +312,9 @@ class HuggingFaceModel(Model):
                 for item in message.parts:
                     if isinstance(item, TextPart):
                         texts.append(item.content)
+                    elif isinstance(item, EncryptedReasoningPart):
+                        # Ignore encrypted reasoning
+                        pass
                     elif isinstance(item, ToolCallPart):
                         tool_calls.append(self._map_tool_call(item))
                     elif isinstance(item, ThinkingPart):

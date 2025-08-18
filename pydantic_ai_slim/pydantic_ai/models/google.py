@@ -19,6 +19,7 @@ from ..messages import (
     BinaryContent,
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
+    EncryptedReasoningPart,
     FileUrl,
     ModelMessage,
     ModelRequest,
@@ -571,6 +572,9 @@ def _content_model_response(m: ModelResponse) -> ContentDict:
             parts.append({'function_call': function_call})
         elif isinstance(item, TextPart):
             parts.append({'text': item.content})
+        elif isinstance(item, EncryptedReasoningPart):  # pragma: no cover
+            # Ignore provider-agnostic encrypted reasoning
+            pass
         elif isinstance(item, ThinkingPart):  # pragma: no cover
             # NOTE: We don't send ThinkingPart to the providers yet. If you are unsatisfied with this,
             # please open an issue. The below code is the code to send thinking to the provider.
