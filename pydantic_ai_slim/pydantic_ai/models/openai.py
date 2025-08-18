@@ -884,15 +884,6 @@ class OpenAIResponsesModel(Model):
             tool_choice = 'auto'
 
         instructions, openai_messages = await self._map_messages(messages)
-        # If encrypted handoff is disabled, strip any encrypted reasoning items from prior history
-        if not model_settings.get('openai_reasoning_encrypted_handoff'):
-            filtered_messages: list[responses.ResponseInputItemParam] = []
-            for it in openai_messages:
-                # We only ever construct reasoning items as plain dicts
-                if isinstance(it, dict) and it.get('type') == 'reasoning' and 'encrypted_content' in it:
-                    continue
-                filtered_messages.append(it)
-            openai_messages = filtered_messages
         reasoning = self._get_reasoning(model_settings)
 
         text: responses.ResponseTextConfigParam | None = None
