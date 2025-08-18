@@ -1040,6 +1040,7 @@ class OpenAIResponsesModel(Model):
                     )
                 )
             elif isinstance(part, RetryPromptPart):
+                # TODO(Marcelo): How do we test this conditional branch?
                 items.extend(self._map_retry_part(part))
             else:
                 assert_never(part)
