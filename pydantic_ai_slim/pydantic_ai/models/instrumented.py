@@ -7,13 +7,18 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 from urllib.parse import urlparse
 
+from opentelemetry._events import (
+    Event,  # pyright: ignore[reportPrivateImportUsage]
+    EventLogger,  # pyright: ignore[reportPrivateImportUsage]
+    EventLoggerProvider,  # pyright: ignore[reportPrivateImportUsage]
+)
 from opentelemetry.metrics import MeterProvider, get_meter_provider
 from opentelemetry.trace import Span, Tracer, TracerProvider, get_tracer_provider
 from opentelemetry.util.types import AttributeValue
 from pydantic import TypeAdapter
 
 from .._run_context import RunContext
-from ..messages import Event, ModelMessage, ModelRequest, ModelResponse
+from ..messages import ModelMessage, ModelRequest, ModelResponse
 from ..settings import ModelSettings
 from . import KnownModelName, Model, ModelRequestParameters, StreamedResponse
 from .wrapper import WrapperModel
@@ -71,7 +76,7 @@ class InstrumentationSettings:
     """
 
     tracer: Tracer = field(repr=False)
-    event_logger: Any = field(repr=False)
+    event_logger: EventLogger = field(repr=False)
     event_mode: Literal['attributes', 'logs'] = 'attributes'
     include_binary_content: bool = True
 
@@ -81,7 +86,7 @@ class InstrumentationSettings:
         event_mode: Literal['attributes', 'logs'] = 'attributes',
         tracer_provider: TracerProvider | None = None,
         meter_provider: MeterProvider | None = None,
-        event_logger_provider: Any | None = None,
+        event_logger_provider: EventLoggerProvider | None = None,
         include_binary_content: bool = True,
         include_content: bool = True,
     ):
@@ -402,7 +407,7 @@ class InstrumentedModel(WrapperModel):
         if not event.body:
             body = {}  # pragma: no cover
         elif isinstance(event.body, Mapping):
-            body = event.body
+            body = event.body  # type: ignore
         else:
             body = {'body': event.body}
         # Keep event.name after attributes to match existing snapshot expectations

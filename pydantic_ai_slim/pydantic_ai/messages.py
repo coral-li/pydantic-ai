@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, cast, overload
 
 import pydantic
 import pydantic_core
+from opentelemetry._events import Event  # pyright: ignore[reportPrivateImportUsage]
 from typing_extensions import TypeAlias, deprecated
 
 from . import _utils
@@ -22,18 +23,6 @@ from .usage import RequestUsage
 
 if TYPE_CHECKING:
     from .models.instrumented import InstrumentationSettings
-
-
-@dataclass
-class Event:
-    """Event used for OpenTelemetry-like instrumentation with minimal fields.
-
-    This is a small, public replacement for the private `opentelemetry._events.Event`.
-    """
-
-    name: str
-    body: dict[str, Any]
-    attributes: dict[str, Any] | None = None
 
 
 AudioMediaType: TypeAlias = Literal['audio/wav', 'audio/mpeg', 'audio/ogg', 'audio/flac', 'audio/aiff', 'audio/aac']
