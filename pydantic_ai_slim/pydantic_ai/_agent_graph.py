@@ -875,7 +875,7 @@ async def _process_message_history(
     run_context: RunContext[DepsT],
 ) -> list[_messages.ModelMessage]:
     """Process message history through a sequence of processors."""
-    messages: list[_messages.ModelMessage] = state.message_history
+    messages = state.message_history
     for processor in processors:
         takes_ctx = is_takes_ctx(processor)
 
@@ -894,6 +894,5 @@ async def _process_message_history(
                 messages = await run_in_executor(sync_processor, messages)
 
     # Replaces the message history in the state with the processed messages
-    # Narrow type for return
     state.message_history = messages
     return messages
